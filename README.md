@@ -50,7 +50,15 @@ Both vision models use a 4-stage Residual SE-CNN backbone (`src/cv_model.py`) wi
 | `crease_classifier` | MCC Law 21.5 (Front-Foot Overstep) | 1,697 frames | 1,358 / 339 | 99.71% | 99.69% | 99.38% | 100.00% |
 | `waist_classifier` | MCC Law 41.7 (Waist-High Full Toss) | 1,200 frames | 960 / 240 | 96.67% | 96.77% | 93.75% | 100.00% |
 
-Trained weights are stored in `models/` in both PyTorch (`.pth`) and exported ONNX (`.onnx`) formats, along with confusion matrices in `models/training_metrics.json`.
+The confusion matrices behind this table are in `models/training_metrics.json`.
+
+### How to read these numbers
+
+- **They are validation figures, not field results.** Each model was scored on a held-out 20% of its own dataset. Neither has been evaluated on an independent set of real match footage yet.
+- **The training data includes synthetic frames.** `src/generate_data.py` draws synthetic crease frames to supplement real ones, and `src/prepare_dataset.py` synthesises waist-height trajectories. The split between real and synthetic frames is not reported here yet, so accuracy on real broadcast frames is likely to be lower than the table suggests.
+- **The trained weights are not in this repository.** `.gitignore` excludes `*.pth`, `*.onnx` and the training data. To get weights, run the training commands under Setup and Usage.
+
+Next step: an evaluation on real frames only, with the real and synthetic counts stated.
 
 ## Directory Structure
 
@@ -61,10 +69,10 @@ backend/
 |   |-- styles.css          # Interface stylesheet
 |   `-- app.js              # Folder watcher polling, SVG fielding diagram, and API client
 |-- models/
-|   |-- crease_classifier.pth
-|   |-- crease_classifier.onnx
-|   |-- waist_classifier.pth
-|   |-- waist_classifier.onnx
+|   |-- crease_classifier.pth   # produced by training, not committed
+|   |-- crease_classifier.onnx  # produced by training, not committed
+|   |-- waist_classifier.pth    # produced by training, not committed
+|   |-- waist_classifier.onnx   # produced by training, not committed
 |   `-- training_metrics.json
 |-- samples/
 |   |-- crease/             # Sample popping-crease frames monitored by the directory watcher
@@ -94,9 +102,9 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Dataset Preparation and Model Training (Optional)
+### 2. Dataset Preparation and Model Training
 
-Pre-trained PyTorch and ONNX checkpoints are already included in `models/`. To rebuild the dataset partitions and retrain both classifiers from scratch:
+Trained checkpoints are not committed to this repository, so this step is needed before the server can run the models. It expects the training images under `data/`, which are also not committed. To build the dataset partitions and train both classifiers:
 
 ```bash
 python src/prepare_dataset.py
@@ -133,3 +141,7 @@ Open `http://127.0.0.1:8000` in a browser.
 | `GET` | `/api/metrics` | Returns training and validation metrics and confusion matrices from `models/training_metrics.json` |
 | `GET` | `/api/history` | Returns the ball-by-ball session log and summary counts |
 | `POST` | `/api/reset-history` | Clears the in-memory session log |
+
+## License
+
+The source code is released under the MIT License (see [`LICENSE`](LICENSE)). The sample images are included for demonstration only and are not covered by that licence.
