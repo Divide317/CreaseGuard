@@ -19,6 +19,7 @@ from torchvision import transforms
 
 from cv_model import CricketClassifier, generate_gradcam_telemetry
 from rule_engine import CricketRuleEngine
+from preprocessing import load_image, prepare_for_inference
 
 # Initialize FastAPI server
 app = FastAPI(
@@ -53,17 +54,11 @@ img_transform = transforms.Compose([
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_BACKEND = os.path.dirname(SCRIPT_DIR)
-WORKSPACE_ROOT = os.path.dirname(PROJECT_BACKEND)
-FRONTEND_DIR = os.path.join(WORKSPACE_ROOT, "frontend")
-if not os.path.exists(FRONTEND_DIR):
-    FRONTEND_DIR = os.path.join(PROJECT_BACKEND, "frontend")
+FRONTEND_DIR = os.path.join(PROJECT_BACKEND, "frontend")
 MODELS_DIR = os.path.join(PROJECT_BACKEND, "models")
-SAMPLES_DIR = os.path.join(PROJECT_BACKEND, "data", "samples")
 
 # Default watched directory containing 'crease' and 'waist' subfolders
-DEFAULT_WATCH_DIR = os.path.join(WORKSPACE_ROOT, "samples")
-if not os.path.exists(DEFAULT_WATCH_DIR):
-    DEFAULT_WATCH_DIR = os.path.join(PROJECT_BACKEND, "samples")
+DEFAULT_WATCH_DIR = os.path.join(PROJECT_BACKEND, "samples")
 
 watch_state = {
     "folder_path": DEFAULT_WATCH_DIR,
@@ -86,18 +81,13 @@ def resolve_watch_folder(raw_path: str) -> str:
     if os.path.isabs(cleaned) and os.path.exists(cleaned):
         return os.path.abspath(cleaned)
 
-    # Check relative to workspace root and backend root
-    for base in [WORKSPACE_ROOT, PROJECT_BACKEND]:
-        candidate = os.path.abspath(os.path.join(base, cleaned))
-        if os.path.exists(candidate):
-            return candidate
+    # Relative names resolve against the backend folder (samples/, live_feed/)
+    candidate = os.path.abspath(os.path.join(PROJECT_BACKEND, cleaned))
+    if os.path.exists(candidate):
+        return candidate
 
-    # If it doesn't exist yet, create it under workspace root
-    target = (
-        os.path.abspath(cleaned)
-        if os.path.isabs(cleaned)
-        else os.path.abspath(os.path.join(WORKSPACE_ROOT, cleaned))
-    )
+    # If it doesn't exist yet, create it under the backend folder
+    target = os.path.abspath(cleaned) if os.path.isabs(cleaned) else candidate
     os.makedirs(os.path.join(target, "crease"), exist_ok=True)
     os.makedirs(os.path.join(target, "waist"), exist_ok=True)
     return target
@@ -170,12 +160,25 @@ def run_delivery_pipeline(
     batter_name: str = "Batter",
     foot_source_name: str = "crease.jpg",
     waist_source_name: Optional[str] = None,
+    enhance_mode: str = "auto",
 ):
     """
     Core adjudication pipeline shared by both folder-watcher ingestion
     and direct multipart uploads.
     """
     t0 = time.perf_counter()
+
+    # Step 0: quality check and (adaptive) enhancement before the CNNs see the frames
+    pil_foot, foot_quality = prepare_for_inference(pil_foot, enhance_mode)
+    waist_quality = None
+    if pil_waist is not None:
+        pil_waist, waist_quality = prepare_for_inference(pil_waist, enhance_mode)
+    quality_warnings = [
+        f"{cam} frame: {issue}"
+        for cam, q in (("Crease", foot_quality), ("Waist", waist_quality))
+        if q
+        for issue in q["issues"]
+    ]
     reasons = []
     is_no_ball = False
 
@@ -310,6 +313,8 @@ def run_delivery_pipeline(
         "ai_beamer_probability": round(beamer_prob, 4) if has_waist_img else None,
         "inference_time_ms": inference_ms,
         "reasons": reasons,
+        "quality_warnings": quality_warnings,
+        "preprocessing": {"crease": foot_quality, "waist": waist_quality},
         "rule_details": rule_details,
         "telemetry": {
             "foot_gradcam": foot_telemetry_b64,
@@ -451,6 +456,7 @@ def evaluate_from_watched_folder(
     fielders_outside_circle: int = Form(2),
     bowler_name: str = Form("J. Bumrah"),
     batter_name: str = Form("J. Buttler"),
+    enhance_mode: str = Form("auto"),
 ):
     """
     Automatically picks up the latest (or specified) images from the watched
@@ -470,12 +476,12 @@ def evaluate_from_watched_folder(
     if not os.path.exists(c_path):
         raise HTTPException(status_code=404, detail=f"Crease image not found: {c_name}")
 
-    pil_foot = Image.open(c_path).convert("RGB")
+    pil_foot = load_image(c_path)
     pil_waist = None
     if w_name and w_name != "NONE":
         w_path = os.path.join(status["waist_subfolder"], os.path.basename(w_name))
         if os.path.exists(w_path):
-            pil_waist = Image.open(w_path).convert("RGB")
+            pil_waist = load_image(w_path)
 
     return run_delivery_pipeline(
         pil_foot=pil_foot,
@@ -493,6 +499,7 @@ def evaluate_from_watched_folder(
         batter_name=batter_name,
         foot_source_name=c_name,
         waist_source_name=w_name if pil_waist else None,
+        enhance_mode=enhance_mode,
     )
 
 
@@ -553,16 +560,17 @@ async def check_delivery(
     fielders_outside_circle: int = Form(0, description="Fielders outside the 30-yard circle"),
     bowler_name: str = Form("Bowler", description="Bowler name for match log"),
     batter_name: str = Form("Batter", description="Batter name for match log"),
+    enhance_mode: str = Form("auto", description="Preprocessing: auto (exposure fix only when needed), full, or off"),
 ):
     foot_content = await foot_image.read()
-    pil_foot = Image.open(io.BytesIO(foot_content)).convert("RGB")
+    pil_foot = load_image(io.BytesIO(foot_content))
 
     pil_waist = None
     waist_name = None
     if waist_image is not None and getattr(waist_image, "filename", "") != "":
         waist_content = await waist_image.read()
         if len(waist_content) > 0:
-            pil_waist = Image.open(io.BytesIO(waist_content)).convert("RGB")
+            pil_waist = load_image(io.BytesIO(waist_content))
             waist_name = waist_image.filename
 
     return run_delivery_pipeline(
@@ -581,4 +589,5 @@ async def check_delivery(
         batter_name=batter_name,
         foot_source_name=foot_image.filename or "crease.jpg",
         waist_source_name=waist_name,
+        enhance_mode=enhance_mode,
     )

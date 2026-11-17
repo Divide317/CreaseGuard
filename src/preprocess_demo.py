@@ -30,17 +30,13 @@ from preprocessing import (  # noqa: E402
 )
 
 PROJECT_BACKEND = os.path.dirname(SCRIPT_DIR)
-WORKSPACE_ROOT = os.path.dirname(PROJECT_BACKEND)
 OUTPUT_DIR = os.path.join(PROJECT_BACKEND, "preprocessing_output")
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def find_sample_folder():
-    for base in (WORKSPACE_ROOT, PROJECT_BACKEND):
-        p = os.path.join(base, "samples")
-        if os.path.isdir(p):
-            return p
-    return None
+    p = os.path.join(PROJECT_BACKEND, "samples")
+    return p if os.path.isdir(p) else None
 
 
 def build_stage_panel(stages, tile=200):

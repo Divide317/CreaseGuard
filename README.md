@@ -56,9 +56,23 @@ The confusion matrices behind this table are in `models/training_metrics.json`.
 
 - **They are validation figures, not field results.** Each model was scored on a held-out 20% of its own dataset. Neither has been evaluated on an independent set of real match footage yet.
 - **The training data includes synthetic frames.** `src/generate_data.py` draws synthetic crease frames to supplement real ones, and `src/prepare_dataset.py` synthesises waist-height trajectories. The split between real and synthetic frames is not reported here yet, so accuracy on real broadcast frames is likely to be lower than the table suggests.
-- **The trained weights are not in this repository.** `.gitignore` excludes `*.pth`, `*.onnx` and the training data. To get weights, run the training commands under Setup and Usage.
+- **The trained weights and training data are in this repository** (`models/` and `data/`), so the server runs straight after cloning, and the training commands under Setup and Usage reproduce them.
 
 Next step: an evaluation on real frames only, with the real and synthetic counts stated.
+
+### Frame Preprocessing
+
+Every frame passes through `src/preprocessing.py` before the CNNs see it. Frames are loaded with EXIF rotation fixed and forced to RGB, then scored for brightness, contrast and sharpness. Any issues found (blurry, low contrast, under- or over-exposed, low resolution) come back as `quality_warnings` in the API response and appear in the console as Frame Quality Notes.
+
+Both evaluation endpoints accept an `enhance_mode` form field:
+
+| Mode | What happens |
+| :--- | :--- |
+| `auto` (default) | Gamma correction only when a frame is under- or over-exposed; other issues are reported but left untouched |
+| `full` | Gamma, denoise, CLAHE and unsharp masking on every frame |
+| `off` | Frame passed through unchanged (quality is still reported) |
+
+`auto` is the default because the models were trained on frames without enhancement. Running `python src/preprocess_demo.py --compare-models` on the samples showed `full` moving a clear beamer frame from 0.99 to 0.51 beamer probability.
 
 ## Directory Structure
 
@@ -69,10 +83,10 @@ backend/
 |   |-- styles.css          # Interface stylesheet
 |   `-- app.js              # Folder watcher polling, SVG fielding diagram, and API client
 |-- models/
-|   |-- crease_classifier.pth   # produced by training, not committed
-|   |-- crease_classifier.onnx  # produced by training, not committed
-|   |-- waist_classifier.pth    # produced by training, not committed
-|   |-- waist_classifier.onnx   # produced by training, not committed
+|   |-- crease_classifier.pth   # loaded by the server
+|   |-- crease_classifier.onnx  # ONNX export (+ .onnx.data weights file)
+|   |-- waist_classifier.pth
+|   |-- waist_classifier.onnx
 |   `-- training_metrics.json
 |-- samples/
 |   |-- crease/             # Sample popping-crease frames monitored by the directory watcher
@@ -85,7 +99,8 @@ backend/
 |   |-- cv_model.py         # Residual SE-CNN architecture, Grad-CAM computation, and training pipeline
 |   |-- rule_engine.py      # ICC and MCC rule adjudication engine (NoBallRuleEngine)
 |   |-- prepare_dataset.py  # Dataset indexing, waist trajectory synthesis, and sample setup
-|   |-- preprocessing.py    # Image contrast enhancement and perspective normalisation
+|   |-- preprocessing.py    # Frame loading, quality checks and enhancement run before every inference
+|   |-- preprocess_demo.py  # Shows each preprocessing stage and compares model output with/without it
 |   `-- generate_data.py    # Synthetic crease frame generator for domain augmentation
 `-- requirements.txt
 ```
@@ -102,9 +117,9 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Dataset Preparation and Model Training
+### 2. Dataset Preparation and Model Training (Optional)
 
-Trained checkpoints are not committed to this repository, so this step is needed before the server can run the models. It expects the training images under `data/`, which are also not committed. To build the dataset partitions and train both classifiers:
+Trained checkpoints (`models/`) and the training images (`data/`) are committed, so this step is only needed to retrain. To rebuild the dataset partitions and retrain both classifiers:
 
 ```bash
 python src/prepare_dataset.py

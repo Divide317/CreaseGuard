@@ -825,6 +825,22 @@ function renderDeliveryVerdict(res) {
     reasonsBox.classList.add("hidden");
   }
 
+  // Frame-quality notes from the preprocessing stage (blur, exposure, etc.)
+  const qualityBox = document.getElementById("qualityContainer");
+  const qualityList = document.getElementById("qualityList");
+  const notes = [...(res.quality_warnings || [])];
+  for (const [cam, q] of Object.entries(res.preprocessing || {})) {
+    if (q && q.applied && q.applied.length) {
+      notes.push(`${cam} frame enhanced before inference: ${q.applied.join(", ")}`);
+    }
+  }
+  if (qualityBox && notes.length > 0) {
+    qualityBox.classList.remove("hidden");
+    qualityList.innerHTML = notes.map((n) => `<li>${n}</li>`).join("");
+  } else if (qualityBox) {
+    qualityBox.classList.add("hidden");
+  }
+
   if (res.rule_details && res.rule_details.checks) {
     document.getElementById("activePhaseBadge").textContent = res.rule_details.powerplay_phase;
     const grid = document.getElementById("complianceGrid");

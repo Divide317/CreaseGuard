@@ -249,12 +249,9 @@ def prepare_curated_samples(project_backend: str):
     samples_dir = os.path.join(project_backend, "data", "samples")
     os.makedirs(samples_dir, exist_ok=True)
 
-    root_dir = os.path.dirname(project_backend)
     target_roots = [
         os.path.join(project_backend, "samples"),
-        os.path.join(root_dir, "samples"),
         os.path.join(project_backend, "live_feed"),
-        os.path.join(root_dir, "live_feed"),
     ]
 
     crease_mappings = [

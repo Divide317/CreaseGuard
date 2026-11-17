@@ -1,9 +1,12 @@
 """
-preprocessing.py - Standalone image preprocessing pipeline for CreaseGuard.
+preprocessing.py - Image preprocessing pipeline for CreaseGuard.
 
-This module is NOT imported by main.py or cv_model.py, so the live server and the
-trained models behave exactly as before. It exists to make every preprocessing
-step explicit, inspectable and measurable (for demonstration / reporting).
+main.py runs every incoming frame through prepare_for_inference() before the CNNs
+see it: EXIF/RGB normalisation, a quality report, and (in the default "auto" mode)
+exposure correction only for under/over-exposed frames. The full enhancement chain
+(denoise + CLAHE + sharpen) is opt-in ("full"), because the CNNs were trained on
+un-enhanced frames and measured runs with preprocess_demo.py --compare-models showed
+it can shift their predictions (e.g. a clear beamer frame dropping from 0.99 to 0.51).
 
 Pipeline stages
 ---------------
@@ -203,6 +206,37 @@ def to_model_tensor(pil_img: Image.Image) -> np.ndarray:
     x = (x - IMAGENET_MEAN) / IMAGENET_STD                  # per-channel z-score
     x = np.transpose(x, (2, 0, 1))                          # CHW
     return np.expand_dims(x, 0).astype(np.float32)          # NCHW
+
+
+ENHANCE_MODES = ("auto", "full", "off")
+
+
+def prepare_for_inference(pil_img: Image.Image, mode: str = "auto"):
+    """
+    Used by the API before inference. Returns (image_for_model, info_dict).
+      off  - frame passed through unchanged (quality is still reported)
+      auto - gamma correction only when the frame is under/over-exposed; other
+             issues (blur, low contrast) are reported but not altered
+      full - the whole enhance_frame() chain
+    """
+    mode = (mode or "auto").lower().strip()
+    if mode not in ENHANCE_MODES:
+        mode = "auto"
+
+    report = assess_quality(pil_img)
+    applied = []
+    out = pil_img
+    if mode == "full":
+        out, _ = enhance_frame(pil_img, report)
+        applied = ["gamma", "denoise", "clahe", "unsharp_mask"]
+    elif mode == "auto" and not (DARK_THRESHOLD <= report.brightness <= BRIGHT_THRESHOLD):
+        out = Image.fromarray(gamma_correct(np.asarray(pil_img), report.brightness))
+        applied = ["gamma"]
+
+    info = report.to_dict()
+    info["mode"] = mode
+    info["applied"] = applied
+    return out, info
 
 
 def preprocess(path_or_file, enhance: bool = True):
